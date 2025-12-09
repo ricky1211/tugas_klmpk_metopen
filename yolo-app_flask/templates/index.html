@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLOv8 Real-time Object Detection Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f8f9fa; }
+        .container-fluid { padding-top: 20px; }
+        .card { margin-bottom: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .card-header { background-color: #007bff; color: white; border-top-left-radius: 10px; border-top-right-radius: 10px; }
+        .video-container { 
+            position: relative; 
+            width: 100%; 
+            padding-bottom: 75%; /* 4:3 Aspect Ratio (480 / 640 = 0.75) */
+            height: 0; 
+            overflow: hidden; 
+            background-color: #000;
+            border-radius: 8px;
+        }
+        .video-feed-img { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; /* Ensures entire frame is visible */
+        }
+        .heatmap-img { 
+            width: 100%; 
+            height: auto; 
+            border-radius: 8px; 
+            background-color: #eee;
+            min-height: 200px; /* Placeholder if no heatmap */
+        }
+        .chart-canvas { height: 300px; width: 100%; }
+        .scrollable-results { max-height: 400px; overflow-y: auto; }
+        .file-upload-section { margin-top: 30px; padding: 20px; border: 1px dashed #ccc; border-radius: 10px; background-color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 class="text-center mb-4">YOLOv8 Real-time Object Detection Dashboard</h1>
+
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">Live Video Feed</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="video-container">
+                            <img id="videoFeed" class="video-feed-img" src="/static/placeholder.jpg" alt="Video Feed">
+                        </div>
+                        <div class="mt-3 text-center">
+                            <button id="startDetectionBtn" class="btn btn-success me-2">Start Live Detection</button>
+                            <button id="stopDetectionBtn" class="btn btn-danger">Stop Live Detection</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">Real-time Statistics</h4>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item"><strong>Objects Detected:</strong> <span id="objectsDetected">0</span></li>
+                            <li class="list-group-item"><strong>FPS:</strong> <span id="fps">0.00</span></li>
+                            <li class="list-group-item"><strong>Avg. Confidence:</strong> <span id="avgConfidence">0.00%</span></li>
+                            <li class="list-group-item"><strong>Total Processing Time:</strong> <span id="processingTime">0.00</span>s</li>
+                            <li class="list-group-item"><strong>Total Frames Processed:</strong> <span id="totalFrames">0</span></li>
+                        </ul>
+                        <div class="mt-3 text-center">
+                            <button id="resetAnalyticsBtn" class="btn btn-info btn-sm">Reset Analytics</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h4 class="mb-0">Heatmap & Zone Counts</h4>
+                    </div>
+                    <div class="card-body text-center">
+                        <img id="heatmapImage" class="heatmap-img" src="" alt="Heatmap">
+                        <h5 class="mt-3">Object Distribution Zones</h5>
+                        <ul id="zoneCountsList" class="list-group list-group-flush">
+                            </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><h4 class="mb-0">Objects Per Frame (Timeline)</h4></div>
+                    <div class="card-body"><canvas id="detectionChart" class="chart-canvas"></canvas></div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><h4 class="mb-0">Average Confidence (Timeline)</h4></div>
+                    <div class="card-body"><canvas id="confidenceChart" class="chart-canvas"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><h4 class="mb-0">Class Distribution (Total)</h4></div>
+                    <div class="card-body"><canvas id="classChart" class="chart-canvas"></canvas></div>
+                    </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><h4 class="mb-0">Upload & Process Files</h4></div>
+                    <div class="card-body file-upload-section">
+                        <div class="mb-3">
+                            <label for="fileInput" class="form-label">Select Image/Video Files:</label>
+                            <input class="form-control" type="file" id="fileInput" multiple accept="image/*,video/*">
+                        </div>
+                        <button id="uploadFilesBtn" class="btn btn-primary me-2">Upload Files</button>
+                        <button id="clearUploadsBtn" class="btn btn-warning">Clear Uploads & Processed</button>
+
+                        <div id="uploadStatus" class="mt-3 alert alert-info d-none"></div>
+                        <div id="processingStatus" class="mt-3 alert alert-info d-none"></div>
+                        
+                        <div id="processedResults" class="mt-3 scrollable-results">
+                            <h5>Processed Results:</h5>
+                            <div id="resultsList" class="list-group">
+                                </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="text-center text-muted py-3">
+            <p>&copy; 2025 YOLOv8 Dashboard. Powered by Flask & Ultralytics.</p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // --- Chart Instances ---
+        let detectionChart;
+        let confidenceChart;
+        let classChart; // For class distribution
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const videoFeed = document.getElementById('videoFeed');
+            const startDetectionBtn = document.getElementById('startDetectionBtn');
+            const stopDetectionBtn = document.getElementById('stopDetectionBtn');
+            const objectsDetectedSpan = document.getElementById('objectsDetected');
+            const fpsSpan = document.getElementById('fps');
+            const avgConfidenceSpan = document.getElementById('avgConfidence');
+            const processingTimeSpan = document.getElementById('processingTime');
+            const totalFramesSpan = document.getElementById('totalFrames');
+            const resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
+            const heatmapImage = document.getElementById('heatmapImage');
+            const zoneCountsList = document.getElementById('zoneCountsList');
+
+            const fileInput = document.getElementById('fileInput');
+            const uploadFilesBtn = document.getElementById('uploadFilesBtn');
+            const clearUploadsBtn = document.getElementById('clearUploadsBtn');
+            const uploadStatus = document.getElementById('uploadStatus');
+            const processingStatus = document.getElementById('processingStatus');
+            const resultsList = document.getElementById('resultsList');
+
+            let statsInterval;
+            let chartInterval;
+            let heatmapInterval;
+
+            // --- Initialize Charts ---
+            const ctxDetection = document.getElementById('detectionChart').getContext('2d');
+            detectionChart = new Chart(ctxDetection, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: 'Objects per frame', data: [], borderColor: 'rgb(75, 192, 192)', backgroundColor: 'rgba(75, 192, 192, 0.2)', tension: 0.1, fill: false }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+
+            const ctxConfidence = document.getElementById('confidenceChart').getContext('2d');
+            confidenceChart = new Chart(ctxConfidence, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: 'Average confidence', data: [], borderColor: 'rgb(255, 99, 132)', backgroundColor: 'rgba(255, 99, 132, 0.2)', tension: 0.1, fill: false }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1 } } }
+            });
+
+            const ctxClass = document.getElementById('classChart').getContext('2d');
+            // For class distribution, a 'bar' or 'doughnut' chart is generally better
+            // If you insist on 'line', the backend needs to provide time-series data per class
+            classChart = new Chart(ctxClass, {
+                type: 'bar', // Changed to 'bar' for better class distribution visualization
+                data: { labels: [], datasets: [{ label: 'Total Object Count', data: [], backgroundColor: [], borderColor: [], borderWidth: 1 }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+
+
+            // --- Helper Functions ---
+            function updateStats() {
+                fetch('/get_stats')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const stats = data.data;
+                            objectsDetectedSpan.textContent = stats.objects_detected;
+                            fpsSpan.textContent = stats.fps.toFixed(2);
+                            avgConfidenceSpan.textContent = (stats.avg_confidence * 100).toFixed(2) + '%';
+                            processingTimeSpan.textContent = stats.processing_time.toFixed(2);
+                            totalFramesSpan.textContent = stats.total_frames;
+                        }
+                    })
+                    .catch(error => console.error('Error fetching stats:', error));
+            }
+
+            function updateCharts() {
+                fetch('/get_chart_data')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            // Update Detection Chart
+                            detectionChart.data.labels = data.data.detection_data.labels;
+                            detectionChart.data.datasets[0].data = data.data.detection_data.datasets[0].data;
+                            detectionChart.update();
+
+                            // Update Confidence Chart
+                            confidenceChart.data.labels = data.data.confidence_data.labels;
+                            confidenceChart.data.datasets[0].data = data.data.confidence_data.datasets[0].data;
+                            confidenceChart.update();
+
+                            // Update Class Distribution Chart (using bar chart data)
+                            classChart.data.labels = data.data.class_distribution_bar_doughnut.labels;
+                            classChart.data.datasets[0].data = data.data.class_distribution_bar_doughnut.datasets[0].data;
+                            classChart.data.datasets[0].backgroundColor = data.data.class_distribution_bar_doughnut.datasets[0].backgroundColor;
+                            classChart.data.datasets[0].borderColor = data.data.class_distribution_bar_doughnut.datasets[0].borderColor;
+                            classChart.update();
+
+                            // Update Zone Counts
+                            zoneCountsList.innerHTML = ''; // Clear previous
+                            data.data.heatmap_zones.zone_names.forEach((name, index) => {
+                                const li = document.createElement('li');
+                                li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                                li.innerHTML = `<strong>${name}:</strong> <span>${data.data.heatmap_zones.zone_counts[index]}</span>`;
+                                zoneCountsList.appendChild(li);
+                            });
+                        }
+                    })
+                    .catch(error => console.error('Error fetching chart data:', error));
+            }
+
+            function updateHeatmap() {
+                fetch('/get_heatmap_image')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success' && data.image) {
+                            heatmapImage.src = data.image; // Image already has data URI prefix from backend
+                        } else {
+                            console.warn('No heatmap image data received or error:', data.message);
+                            // Set a placeholder or clear if no data
+                            heatmapImage.src = ''; 
+                            heatmapImage.alt = "No Heatmap Data";
+                        }
+                    })
+                    .catch(error => console.error('Error fetching heatmap image:', error));
+            }
+
+            function startIntervals() {
+                updateStats(); // Initial call
+                updateCharts();
+                updateHeatmap();
+                statsInterval = setInterval(updateStats, 1000); // Every 1 second
+                chartInterval = setInterval(updateCharts, 2000); // Every 2 seconds
+                heatmapInterval = setInterval(updateHeatmap, 3000); // Every 3 seconds
+            }
+
+            function stopIntervals() {
+                clearInterval(statsInterval);
+                clearInterval(chartInterval);
+                clearInterval(heatmapInterval);
+            }
+
+            // --- Event Listeners ---
+            startDetectionBtn.addEventListener('click', function() {
+                fetch('/start_detection')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert('Live detection started!');
+                            videoFeed.src = "/video_feed"; // Start streaming video
+                            startIntervals(); // Start updating stats and charts
+                        } else {
+                            alert('Error starting detection: ' + data.message);
+                            console.error('Start detection error:', data.message);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Failed to connect to backend for starting detection.');
+                        console.error('Fetch error:', error);
+                    });
+            });
+
+            stopDetectionBtn.addEventListener('click', function() {
+                fetch('/stop_detection')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert('Live detection stopped!');
+                            videoFeed.src = "/static/placeholder.jpg"; // Stop streaming, show placeholder
+                            stopIntervals(); // Stop updating stats and charts
+                        } else {
+                            alert('Error stopping detection: ' + data.message);
+                            console.error('Stop detection error:', data.message);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Failed to connect to backend for stopping detection.');
+                        console.error('Fetch error:', error);
+                    });
+            });
+
+            resetAnalyticsBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to reset all analytics data?')) {
+                    fetch('/reset_analytics', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                alert(data.message);
+                                // Immediately update UI after reset
+                                updateStats();
+                                updateCharts();
+                                updateHeatmap();
+                            } else {
+                                alert('Error resetting analytics: ' + data.message);
+                            }
+                        })
+                        .catch(error => console.error('Error resetting analytics:', error));
+                }
+            });
+
+            uploadFilesBtn.addEventListener('click', function() {
+                const files = fileInput.files;
+                if (files.length === 0) {
+                    alert('Please select files to upload.');
+                    return;
+                }
+
+                uploadStatus.classList.remove('d-none');
+                uploadStatus.classList.remove('alert-danger', 'alert-success');
+                uploadStatus.classList.add('alert-info');
+                uploadStatus.textContent = 'Uploading files...';
+
+                const formData = new FormData();
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('files', files[i]);
+                }
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        uploadStatus.classList.remove('alert-info');
+                        uploadStatus.classList.add('alert-success');
+                        uploadStatus.textContent = data.message;
+                        processUploadedFiles(data.filenames); // Immediately process after upload
+                    } else {
+                        uploadStatus.classList.remove('alert-info');
+                        uploadStatus.classList.add('alert-danger');
+                        uploadStatus.textContent = data.message + (data.details ? ' Details: ' + data.details.join(', ') : '');
+                    }
+                })
+                .catch(error => {
+                    uploadStatus.classList.remove('alert-info');
+                    uploadStatus.classList.add('alert-danger');
+                    uploadStatus.textContent = 'Network error during upload.';
+                    console.error('Upload error:', error);
+                });
+            });
+
+            function processUploadedFiles(filenames) {
+                if (filenames.length === 0) {
+                    processingStatus.classList.remove('alert-info');
+                    processingStatus.classList.add('alert-warning');
+                    processingStatus.textContent = 'No files to process.';
+                    return;
+                }
+
+                processingStatus.classList.remove('d-none');
+                processingStatus.classList.remove('alert-danger', 'alert-success');
+                processingStatus.classList.add('alert-info');
+                processingStatus.textContent = `Processing ${filenames.length} file(s)...`;
+                resultsList.innerHTML = ''; // Clear previous results
+
+                fetch('/process_uploads', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filenames: filenames })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        processingStatus.classList.remove('alert-info');
+                        processingStatus.classList.add('alert-success');
+                        processingStatus.textContent = data.message;
+                        
+                        data.results.forEach(result => {
+                            const listItem = document.createElement('div');
+                            listItem.className = 'list-group-item';
+                            let content = `<strong>${result.filename}</strong>: `;
+                            if (result.status === 'success') {
+                                content += `<span class="text-success">Processed!</span> Detections: ${result.detections}. `;
+                                if (result.processed_url.endsWith('.mp4') || result.processed_url.endsWith('.avi') || result.processed_url.endsWith('.mov')) {
+                                    content += `<a href="${result.processed_url}" target="_blank">View Video</a>`;
+                                } else {
+                                    content += `<a href="${result.processed_url}" target="_blank"><img src="${result.processed_url}" alt="Processed Image" style="max-width: 100px; max-height: 100px; margin-top: 5px;"></a>`;
+                                }
+                            } else if (result.status === 'info') {
+                                content += `<span class="text-info">${result.message}</span>`;
+                                if (result.processed_url) { // For videos processed as placeholder
+                                    content += `<a href="${result.processed_url}" target="_blank">View Result (if any)</a>`;
+                                }
+                            }
+                            else {
+                                content += `<span class="text-danger">Failed:</span> ${result.message}`;
+                            }
+                            listItem.innerHTML = content;
+                            resultsList.appendChild(listItem);
+                        });
+                    } else {
+                        processingStatus.classList.remove('alert-info');
+                        processingStatus.classList.add('alert-danger');
+                        processingStatus.textContent = data.message;
+                        console.error('Processing error:', data.details || data.message);
+                    }
+                })
+                .catch(error => {
+                    processingStatus.classList.remove('alert-info');
+                    processingStatus.classList.add('alert-danger');
+                    processingStatus.textContent = 'Network error during processing.';
+                    console.error('Processing fetch error:', error);
+                });
+            }
+
+            clearUploadsBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to clear all uploaded and processed files?')) {
+                    fetch('/clear_uploads', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                alert(data.message);
+                                // Clear UI elements
+                                fileInput.value = '';
+                                uploadStatus.classList.add('d-none');
+                                processingStatus.classList.add('d-none');
+                                resultsList.innerHTML = '';
+                            } else {
+                                alert('Error clearing files: ' + data.message);
+                            }
+                        })
+                        .catch(error => console.error('Error clearing files:', error));
+                }
+            });
+
+            // Initial calls to populate stats and charts (if detection is already running)
+            // Or just to show initial zeros/empty charts
+            updateStats();
+            updateCharts();
+            updateHeatmap(); // Also fetch initial heatmap (will be blank if no activity)
+
+            // Optional: If you want to automatically start detection on page load
+            // startDetectionBtn.click(); 
+        });
+    </script>
+</body>
+</html>
